@@ -1,4 +1,4 @@
-import os
+import os, re, json, cv2, base64
 from langchain.tools import tool
 from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage
@@ -11,6 +11,31 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 # Initialize VLM for tools
 vlm = ChatGroq(api_key = GROQ_API_KEY, model="meta-llama/llama-4-scout-17b-16e-instruct", temperature=0)
 
+# Extract valid json from llms response
+def extract_valid_json(text):
+    # find first JSON block
+    match = re.search(r'\{.*\}', text, re.DOTALL)
+    if not match:
+        raise ValueError("No JSON found")
+    json_str = match.group(0)
+    # validate JSON
+    parsed_json = json.loads(json_str)
+    return parsed_json
+
+# Crop image and  convert it to base64
+def crop_to_base64(image, bbox):
+    x1, y1, x2, y2 = bbox
+
+    # Crop image
+    crop = image[y1:y2, x1:x2]
+
+    # Encode to PNG in memory
+    _, buffer = cv2.imencode(".png", crop)
+
+    # Convert to base64
+    img_base64 = base64.b64encode(buffer).decode("utf-8")
+
+    return img_base64
 
 # Tool prompts
 CHART_ANALYSIS_PROMPT = """You are a Chart Analysis specialist. 
@@ -78,54 +103,62 @@ def call_vlm_with_image(image_base64, prompt):
 
 
 @tool
-def AnalyzeChart(region_id: int, region_images) -> str:
+def AnalyzeChart(base_64: str) -> str:
     """Analyze a chart or figure region using VLM. 
     Use this tool when you need to extract data from charts, graphs, or figures.
     
     Args:
-        region_id: The ID of the layout region to analyze (must be a chart/figure type)
+        base_64: Base_64 of layout region to analyze
     
     Returns:
         JSON string with chart type, axes, data points, and trends
-    STRICT:
-        Only provide the json in the given format, Do not provide any other information.
     """
-    if region_id not in region_images:
-        return f"Error: Region {region_id} not found. Available regions: {list(region_images.keys())}"
     
-    region_data = region_images[region_id]
-    
-    if region_data['type'] not in ['chart', 'figure']:
-        return f"Warning: Region {region_id} is type '{region_data['type']}', not a chart/figure. Proceeding anyway."
-    
-    result = call_vlm_with_image(region_data['base64'], CHART_ANALYSIS_PROMPT)
+    result = call_vlm_with_image(base_64, CHART_ANALYSIS_PROMPT)
     
     return result
 
+
+
 @tool
-def AnalyzeTable(region_id: int, region_images) -> str:
+def AnalyzeTable(base_64: str) -> str:
     """
     Extract structured data from a table region using VLM.
     Use this tool when you need to extract tabular data 
     with headers and rows.
     
     Args:
-        region_id: The ID of the layout region to analyze (must be a table type)
+        base_64: Base_64 of layout region to analyze
     
     Returns:
         JSON string with table headers, rows, and any notes
-    STRICT:
-        Only provide the json in the given format, Do not provide any other information.
     """
-    # print(region_images)
-    if region_id not in region_images:
-        return f"Error: Region {region_id} not found. Available regions: {list(region_images.keys())}"
-
-    region_data = region_images[region_id]
     
-    if region_data['type'] != 'table':
-        return f"Warning: Region {region_id} is type '{region_data['type']}', not a table. Proceeding anyway."
-    
-    result = call_vlm_with_image(region_data['base64'], TABLE_ANALYSIS_PROMPT)
+    result = call_vlm_with_image(base_64, TABLE_ANALYSIS_PROMPT)
     return result
 
+print("AnalyzeTable tool defined")
+
+# Extract json data for tables and charts
+def process_charts_tables(r, image):
+    region_data = {
+            "region_id": r.region_id,
+            "page": r.page,
+            "type": r.region_type,
+            "bbox": r.bbox,
+            "content": None,
+            "confidence": r.confidence
+        }
+
+    base_64 = crop_to_base64(image, r.bbox)
+    
+    if r.region_type == "table":
+        txt = AnalyzeTable.invoke({"base_64": base_64})
+        content = extract_valid_json(txt)
+
+    elif r.region_type in ["chart","figure"]:
+        txt = AnalyzeChart.invoke({"base_64": base_64})
+        content = extract_valid_json(txt)
+
+    region_data["content"] = content
+    return region_data

@@ -1,4 +1,7 @@
 import cv2
+import fitz
+import numpy as np
+from pathlib import Path
 
 def add_padding(img, pad=40):
     return cv2.copyMakeBorder(
@@ -28,6 +31,29 @@ def preprocess_image(img, max_side=1024):
     scale = min(max_side / max(h, w), 1.0)
     img = cv2.resize(img, None, fx=scale, fy=scale)
     return img
+
+def load_pages(file_path):
+    ext = Path(file_path).suffix.lower()
+
+    # ---------- PDF ----------
+    if ext == ".pdf":
+        doc = fitz.open(file_path)
+        for i, page in enumerate(doc):
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            img = np.frombuffer(
+                pix.samples,
+                dtype=np.uint8
+            ).reshape(pix.height, pix.width, pix.n)
+            yield i, img
+
+    #---------- IMAGE ----------
+    elif ext in [".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".webp"]:
+        img = cv2.imread(file_path)
+        if img is None:
+            raise ValueError("Invalid image")
+        yield 0, img
+    else:
+        raise ValueError(f"Unsupported file type: {ext}")
 
 
 def enhance_image(file_path):
