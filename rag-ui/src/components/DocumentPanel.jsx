@@ -154,25 +154,39 @@ export default function DocumentPanel({ docUrl, setDocUrl, setCollectionName }) 
 
             {docUrl && (
                 <div
-                    className="preview"
-                    style={{
-                    transform: `scale(${zoom})`,
+                  className="preview"
+                  style={{
+                    width: "100%",
+                    height: "100%",
                     opacity: loading ? 0.5 : 1
-                    }}
+                  }}
                 >
 
-                    {fileType === "image" && (
-                    <img src={docUrl} alt="doc" />
-                    )}
-
-                    {fileType === "pdf" && (
-                    <iframe
-                        src={docUrl}
-                        title="pdf"
-                        className="pdf-view"
+                  {fileType === "image" && (
+                    <img
+                      src={docUrl}
+                      alt="doc"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        objectFit: "contain",
+                        transform: `scale(${zoom})`,
+                        transformOrigin: "center"
+                      }}
                     />
-                    )}
+                  )}
 
+                  {fileType === "pdf" && (
+                    <iframe
+                      src={`${docUrl}#toolbar=0&navpanes=0`}
+                      title="pdf"
+                      style={{
+                        width: "100%",
+                        height: "100%",
+                        border: "none"
+                      }}
+                    />
+                  )}
                 </div>
             )}
 
@@ -222,13 +236,11 @@ export default function DocumentPanel({ docUrl, setDocUrl, setCollectionName }) 
 
       .viewer{
         flex:1;
-        overflow:auto;
-        padding:30px;
+        overflow:hidden;
         display:flex;
-        justify-content:center;
-        align-items:flex-start;
-        position:relative;  /* 🔥 ADD THIS */
+        position:relative;
       }
+
 
       .no-doc{
         margin:auto;
@@ -251,20 +263,13 @@ export default function DocumentPanel({ docUrl, setDocUrl, setCollectionName }) 
       }
 
       .preview{
-        transition:0.2s;
+        width:100%;
+        height:100%;
+        display:flex;
+        justify-content:center;
+        align-items:center;
       }
 
-      .preview img{
-        max-width:100%;
-        display:block;
-        border-radius:10px;
-      }
-
-      .pdf-view{
-        width:900px;
-        height:1200px;
-        border:none;
-      }
 
       /* 🔥 GLASS LOADER */
 

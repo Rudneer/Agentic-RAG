@@ -3,11 +3,10 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain.chains import create_retrieval_chain
 from langchain_core.prompts import ChatPromptTemplate
+from langchain.schema import Document
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
-import os
-import re
-import chromadb
+import os, re, chromadb, json
 
 load_dotenv()
 
@@ -68,22 +67,44 @@ def clear_all_documents():
         print("⚠️ No documents found")
 
 
-def get_docs_for_DB(vector_docs):
-    from langchain.schema import Document
+def get_docs_from_DB(results):
     docs = []
-    for d in vector_docs:
-        metadata = d["metadata"].copy()
-        # convert bbox list to string
-        if "bbox" in metadata:
-            metadata["bbox"] = ",".join(map(str, metadata["bbox"]))
 
-        docs.append(
-            Document(
-                page_content=d["text"],
-                metadata=metadata
+    for page_data in results:
+        page = page_data["page"]
+
+        # Text regions
+        for i, text in enumerate(page_data["text_regions"]):
+            content = f"[Page {page}] {text}"
+
+            docs.append(
+                Document(
+                    page_content=content,
+                    metadata={
+                        "page": page,
+                        "type": "text",
+                        "chunk_id": i
+                    }
+                )
             )
-        )
+
+        # Structured regions
+        for i, region in enumerate(page_data["structured_regions"]):
+            content = f"[Page {page}] Structured Data:\n{json.dumps(region)}"
+
+            docs.append(
+                Document(
+                    page_content=content,
+                    metadata={
+                        "page": page,
+                        "type": "structured",
+                        "chunk_id": i
+                    }
+                )
+            )
+
     return docs
+
 
 def ingest_document(vectordb, collection_name, docs):
 
