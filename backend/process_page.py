@@ -2,6 +2,7 @@ from typing import List
 from dataclasses import dataclass
 from concurrent.futures import ThreadPoolExecutor
 from charts_table_tools import process_charts_tables
+from image_tools import enhance_image
 
 @dataclass
 class LayoutRegion:
@@ -112,8 +113,11 @@ def extract_regions(layout_engine, page_idx, image) -> List[LayoutRegion]:
 def process_page_parallel(models, page_idx, image):
     ocr = models["ocr"]
 
+    # image = enhance_image(image)
+
     layout_engine = models["layout_engine"]
     regions = extract_regions(layout_engine, page_idx, image)
+    print(regions)
 
     txt_list = []
     final_regions = []
@@ -121,7 +125,7 @@ def process_page_parallel(models, page_idx, image):
     llm_regions = []
 
     for r in regions:
-        if r.region_type in ["table", "figure", "chart", "equation"]:
+        if r.region_type in ["table", "figure", "chart", "equation", "image"]:
             llm_regions.append(r)
         else:
             text_regions.append(r)

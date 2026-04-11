@@ -6,7 +6,7 @@ from model_loader import load_models
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Body
-from vectordb_helper import get_vector_db, get_answer, get_docs_from_DB, ingest_document
+from vectordb_helper import get_collection, get_answer, get_docs_from_DB, ingest_document, get_retriever
 from image_tools import load_pages
 from process_page import process_page_parallel
 
@@ -100,8 +100,8 @@ async def parse_document(data: dict = Body(...)):
 
     print(f"Storing docs in vector DB -----------------------------------------")
     t3 = time.time()
-    vectordb = get_vector_db(models, collection_name)
-    ingest_document(vectordb, collection_name, docs)
+    collection = get_collection(collection_name)
+    ingest_document(models["embedding"], collection, collection_name, docs)
     print(f"Storing into vector DB took {time.time() - t3:.2f} s")
 
     print(f"Total time {time.time() - t8:.2f} s")
@@ -118,13 +118,9 @@ async def parse_document(data: dict = Body(...)):
 @app.post("/chat")
 async def chat(req: ChatRequest):
 
-    vectordb = get_vector_db(models, req.collection_name)
-
-    retriever = vectordb.as_retriever(search_kwargs={"k": 5})
-    print(retriever)
+    retriever = get_retriever(models["embedding"], req.collection_name)
 
     answer = get_answer(retriever, req.query)
 
-    return {
-        "answer": answer,
-    }
+    return {"answer": answer}
+

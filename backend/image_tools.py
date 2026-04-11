@@ -56,8 +56,7 @@ def load_pages(file_path):
         raise ValueError(f"Unsupported file type: {ext}")
 
 
-def enhance_image(file_path):
-    img = cv2.imread(file_path)
+def enhance_image(img):
     img = preprocess_image(img)
     img = add_padding(img, pad=40)
     img = enhance_contrast(img)

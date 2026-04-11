@@ -13,14 +13,30 @@ vlm = ChatGroq(api_key = GROQ_API_KEY, model="meta-llama/llama-4-scout-17b-16e-i
 
 # Extract valid json from llms response
 def extract_valid_json(text):
-    # find first JSON block
-    match = re.search(r'\{.*\}', text, re.DOTALL)
-    if not match:
-        raise ValueError("No JSON found")
-    json_str = match.group(0)
-    # validate JSON
-    parsed_json = json.loads(json_str)
-    return parsed_json
+
+    # Extract JSON inside ```json ``` blocks if present
+    match = re.search(r"```json(.*?)```", text, re.DOTALL)
+
+    if match:
+        text = match.group(1).strip()
+
+    # Find first JSON object
+    start = text.find("{")
+    end = text.rfind("}")
+
+    if start == -1 or end == -1:
+        raise ValueError("No JSON found in response")
+
+    json_str = text[start:end+1]
+
+    try:
+        return json.loads(json_str)
+
+    except json.JSONDecodeError:
+        # fallback: try to fix trailing commas
+        json_str = re.sub(r",\s*}", "}", json_str)
+        json_str = re.sub(r",\s*]", "]", json_str)
+        return json.loads(json_str)
 
 # Crop image and  convert it to base64
 def crop_to_base64(image, bbox):
@@ -62,7 +78,7 @@ Return a JSON object with this structure:
 ```
 """
 
-
+# Merged cells,
 TABLE_ANALYSIS_PROMPT = """You are a Table Extraction specialist. 
 Extract structured data from this table image.
 
@@ -71,7 +87,8 @@ Extract structured data from this table image.
 2. **Extract All Data**: 
     - Preserve exact values and alignment
 3. **Handle Special Cases**: 
-    - Merged cells, empty cells (mark as null), multi-line headers
+    - empty cells (mark as null), multi-line headers
+    - If debit and credit both appear in a single row in a bank statement, it is likely that two rows were merged. Split them into two separate rows.
 
 Return a JSON object with this structure:
 ```json
@@ -156,7 +173,7 @@ def process_charts_tables(r, image):
         txt = AnalyzeTable.invoke({"base_64": base_64})
         content = extract_valid_json(txt)
 
-    elif r.region_type in ["chart","figure"]:
+    elif r.region_type in ["chart","figure","image"]:
         txt = AnalyzeChart.invoke({"base_64": base_64})
         content = extract_valid_json(txt)
 

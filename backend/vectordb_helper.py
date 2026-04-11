@@ -7,48 +7,72 @@ from langchain.schema import Document
 from dotenv import load_dotenv
 from langchain_groq import ChatGroq
 import os, re, chromadb, json
+from langchain_openai import OpenAIEmbeddings
 
 load_dotenv()
 
 API_KEY = os.getenv("API_KEY")
 
-VECTOR_DB_CACHE = {}
+COLLECTION_CACHE = {}
 CHROMA_CLIENT = None
 
-def get_vector_db(models, collection_name):
-    global VECTOR_DB_CACHE, CHROMA_CLIENT
+BASE_DIR = Path(__file__).resolve().parent.parent
+CHROMA_DB_PATH = BASE_DIR / "vectordb" / "chroma_db"
 
-    # Return if already cached
-    if collection_name in VECTOR_DB_CACHE:
-        print("⚡ Using cached vector DB")
-        return VECTOR_DB_CACHE[collection_name]
+def get_collection(collection_name):
+    global COLLECTION_CACHE, CHROMA_CLIENT
 
-    print("🚀 Creating new vector DB...")
+    # Return cached collection
+    if collection_name in COLLECTION_CACHE:
+        print("⚡ Using cached collection")
+        return COLLECTION_CACHE[collection_name]
+
+    print("🚀 Creating / loading collection...")
 
     # Initialize client once
     if CHROMA_CLIENT is None:
-        BASE_DIR = Path(__file__).resolve().parent
-        PERSIST_DIR = BASE_DIR.parent / "vectordb" / "chroma_db"
-        CHROMA_CLIENT = chromadb.PersistentClient(path=str(PERSIST_DIR))
 
-    # Create vectordb
-    vectordb = Chroma(
-        client=CHROMA_CLIENT,
-        collection_name=collection_name,
-        embedding_function=models["embedding"]
+        CHROMA_CLIENT = chromadb.PersistentClient(
+            path=str(CHROMA_DB_PATH)
+        )
+
+    # Get or create collection
+    collection = CHROMA_CLIENT.get_or_create_collection(
+        name=collection_name
     )
 
-    # Store in cache
-    VECTOR_DB_CACHE[collection_name] = vectordb
+    # Cache collection
+    COLLECTION_CACHE[collection_name] = collection
 
-    return vectordb
+    return collection
+
+RETRIEVER_CACHE = {}
+
+def get_retriever(embedding_model, collection_name):
+
+    global RETRIEVER_CACHE
+
+    if collection_name in RETRIEVER_CACHE:
+        print("⚡ Using cached retriever")
+        return RETRIEVER_CACHE[collection_name]
+
+    vectordb = Chroma(
+        collection_name=collection_name,
+        embedding_function=embedding_model,
+        persist_directory=str(CHROMA_DB_PATH)
+    )
+
+    retriever = vectordb.as_retriever()
+
+    RETRIEVER_CACHE[collection_name] = retriever
+
+    return retriever
+
 
 def clear_all_documents():
     db_path = Path(__file__).resolve().parent / "chroma_db"
 
-    embedding = HuggingFaceEmbeddings(
-        model_name="sentence-transformers/all-MiniLM-L6-v2"
-    )
+    embedding = OpenAIEmbeddings(model="text-embedding-3-small")
 
     vectordb = Chroma(
         collection_name="ade_documents",
@@ -65,6 +89,13 @@ def clear_all_documents():
         print(f"🧹 Deleted {len(ids)} documents, structure intact ✅")
     else:
         print("⚠️ No documents found")
+        
+
+# Generate embeddings from docs
+def generate_embeddings(embedding_model, docs):
+    texts = [doc.page_content for doc in docs]
+    embeddings = embedding_model.embed_documents(texts)
+    return embeddings
 
 
 def get_docs_from_DB(results):
@@ -83,7 +114,7 @@ def get_docs_from_DB(results):
                     metadata={
                         "page": page,
                         "type": "text",
-                        "chunk_id": i
+                        "chunk_id": f"{page}_text_{i}"
                     }
                 )
             )
@@ -98,7 +129,7 @@ def get_docs_from_DB(results):
                     metadata={
                         "page": page,
                         "type": "structured",
-                        "chunk_id": i
+                        "chunk_id": f"{page}_structure_{i}"
                     }
                 )
             )
@@ -106,11 +137,21 @@ def get_docs_from_DB(results):
     return docs
 
 
-def ingest_document(vectordb, collection_name, docs):
+def ingest_document(embedding_model, collection, collection_name, docs):
 
-    vectordb.add_documents(docs)
+    ids = [
+        f"{collection_name}_{doc.metadata['chunk_id']}"
+        for doc in docs
+    ]
 
-    print(f"✅ Stored {len(docs)} chunks in collection: {collection_name}")
+    collection.add(
+        documents=[doc.page_content for doc in docs],
+        metadatas=[doc.metadata for doc in docs],
+        embeddings=generate_embeddings(embedding_model, docs),
+        ids=ids
+    )
+
+    print(f"✅ Stored {len(docs)} chunks in collection")
 
 
 def clean_llm_output(text: str) -> str:
@@ -156,6 +197,17 @@ def get_answer(retriever, user_query):
 
         IMPORTANT:
         Structured JSON data is more accurate than OCR text.
+        The document may contain OCR mistakes. Words may be slightly misspelled or 
+        characters may be misread.
+
+        Examples:
+        - "IESC" may mean "IFSC"
+        - "Acc0unt" may mean "Account"
+        - "Brnch" may mean "Branch"
+
+        When answering the user's question, interpret the document intelligently 
+        and assume such errors may exist.
+
 
         PRIORITY RULES:
 
@@ -184,10 +236,17 @@ def get_answer(retriever, user_query):
     llm = ChatGroq(
         api_key=API_KEY,
         model="openai/gpt-oss-120b",
-        temperature=1
+        temperature=0.5
     )
 
     rag_chain = create_retrieval_chain(retriever, prompt | llm)
+
+    docs = retriever.invoke(user_query)
+
+    for i, doc in enumerate(docs):
+        print(f"Chunk {i+1}")
+        print(doc.page_content)
+        print("-----")
 
     response = rag_chain.invoke({"input": user_query})
 
